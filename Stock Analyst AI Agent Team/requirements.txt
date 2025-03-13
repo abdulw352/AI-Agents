@@ -1,6 +1,7 @@
 langchain==0.1.12
 langchain-community==0.0.29
 langchain-core==0.1.30
+langchain-ollama==0.0.2
 langgraph==0.0.36
 streamlit==1.32.0
 ollama==0.1.7
