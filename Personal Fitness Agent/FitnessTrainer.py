@@ -392,3 +392,549 @@ def render_profile_form():
         return updated_profile
     
     return profile
+
+def render_data_upload():
+    """Render the data upload section"""
+    st.header("📊 Your Fitness Data")
+    
+    st.info("Upload your fitness data CSV or Excel file to get personalized insights. The file should contain workout logs, weight tracking, or other fitness metrics.")
+    
+    uploaded_file = st.file_uploader("Choose a file", type=["csv", "xlsx", "xls"])
+    
+    if uploaded_file is not None:
+        # Save the file to data folder
+        file_name = uploaded_file.name
+        file_path = os.path.join(DATA_FOLDER, file_name)
+        
+        with open(file_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        
+        st.success(f"✅ File saved to {file_path}")
+        
+        # Load and return the data
+        data = load_user_data(file_path)
+        
+        # Display data preview
+        st.subheader("Data Preview")
+        st.dataframe(data.head())
+        
+        return data
+    
+    # Check if data files exist in the data folder
+    existing_files = [f for f in os.listdir(DATA_FOLDER) if f.endswith(('.csv', '.xlsx', '.xls'))]
+    
+    if existing_files:
+        st.subheader("Previous Data Files")
+        selected_file = st.selectbox("Select a file to use", options=existing_files)
+        
+        if selected_file:
+            file_path = os.path.join(DATA_FOLDER, selected_file)
+            data = load_user_data(file_path)
+            
+            # Display data preview
+            st.subheader("Data Preview")
+            st.dataframe(data.head())
+            
+            return data
+    
+    # Create sample data for demonstration
+    if st.checkbox("Use sample data for demonstration"):
+        # Generate sample fitness data
+        date_range = pd.date_range(end=datetime.now(), periods=30).tolist()
+        
+        sample_data = pd.DataFrame({
+            'Date': date_range,
+            'Weight (kg)': np.linspace(80, 77, 30) + np.random.normal(0, 0.5, 30),
+            'Steps': np.random.randint(5000, 15000, 30),
+            'Calories Burned': np.random.randint(1800, 3000, 30),
+            'Workout Duration (min)': np.random.randint(0, 120, 30),
+            'Sleep (hours)': np.random.uniform(5, 9, 30).round(1)
+        })
+        
+        # Save sample data
+        sample_path = os.path.join(DATA_FOLDER, "sample_fitness_data.csv")
+        sample_data.to_csv(sample_path, index=False)
+        
+        st.success(f"✅ Sample data created at {sample_path}")
+        
+        # Display data preview
+        st.subheader("Data Preview")
+        st.dataframe(sample_data.head())
+        
+        return sample_data
+    
+    return pd.DataFrame()  # Return empty dataframe if no data is uploaded
+
+def visualize_data(data: pd.DataFrame):
+    """Create visualizations for the fitness data"""
+    if data.empty:
+        return
+    
+    st.header("📈 Data Visualization")
+    
+    # Determine the date column
+    date_cols = [col for col in data.columns if 'date' in col.lower() or 'time' in col.lower()]
+    date_col = date_cols[0] if date_cols else None
+    
+    if date_col:
+        # Ensure date column is datetime
+        data[date_col] = pd.to_datetime(data[date_col])
+        
+        # Sort by date
+        data = data.sort_values(by=date_col)
+    
+    # Create tabs for different visualizations
+    tab1, tab2, tab3 = st.tabs(["Trends", "Correlations", "Summary"])
+    
+    with tab1:
+        st.subheader("Fitness Metrics Over Time")
+        
+        if date_col:
+            # Get numeric columns for plotting
+            numeric_cols = data.select_dtypes(include=[np.number]).columns.tolist()
+            
+            if numeric_cols:
+                selected_metric = st.selectbox(
+                    "Select metric to visualize",
+                    options=numeric_cols
+                )
+                
+                # Plot the selected metric over time
+                fig = px.line(
+                    data, 
+                    x=date_col, 
+                    y=selected_metric,
+                    title=f"{selected_metric} Over Time",
+                    markers=True
+                )
+                
+                # Add trend line
+                fig.add_trace(
+                    go.Scatter(
+                        x=data[date_col],
+                        y=data[selected_metric].rolling(window=7).mean(),
+                        mode='lines',
+                        name='7-day Moving Average',
+                        line=dict(color='red', dash='dash')
+                    )
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Add progress metrics
+                if len(data) > 1:
+                    first_value = data[selected_metric].iloc[0]
+                    last_value = data[selected_metric].iloc[-1]
+                    change = last_value - first_value
+                    percent_change = (change / first_value) * 100 if first_value != 0 else 0
+                    
+                    # Determine if increase is good or bad based on the metric name
+                    positive_metrics = ["steps", "workout", "duration", "sleep", "water"]
+                    negative_metrics = ["weight", "fat", "bmi", "waist"]
+                    
+                    is_positive_metric = any(term in selected_metric.lower() for term in positive_metrics)
+                    is_negative_metric = any(term in selected_metric.lower() for term in negative_metrics)
+                    
+                    if (is_positive_metric and change > 0) or (is_negative_metric and change < 0):
+                        trend_class = "trend-up"
+                        trend_icon = "📈"
+                    elif (is_positive_metric and change < 0) or (is_negative_metric and change > 0):
+                        trend_class = "trend-down"
+                        trend_icon = "📉"
+                    else:
+                        trend_class = "trend-neutral"
+                        trend_icon = "➡️"
+                    
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric(
+                            label=f"Starting {selected_metric}",
+                            value=f"{first_value:.1f}"
+                        )
+                    
+                    with col2:
+                        st.metric(
+                            label=f"Current {selected_metric}",
+                            value=f"{last_value:.1f}",
+                            delta=f"{change:.1f}"
+                        )
+                    
+                    with col3:
+                        st.markdown(
+                            f"""
+                            <div class="metrics-card">
+                                <h4>Overall Trend</h4>
+                                <p><span class="{trend_class}">{trend_icon} {percent_change:.1f}%</span></p>
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+    
+    with tab2:
+        st.subheader("Correlations Between Metrics")
+        
+        # Get numeric columns for correlation
+        numeric_cols = data.select_dtypes(include=[np.number]).columns.tolist()
+        
+        if len(numeric_cols) >= 2:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                x_metric = st.selectbox("X-axis metric", options=numeric_cols, key="x_metric")
+            
+            with col2:
+                y_metric = st.selectbox("Y-axis metric", options=numeric_cols, key="y_metric", index=1 if len(numeric_cols) > 1 else 0)
+            
+            # Create scatter plot
+            fig = px.scatter(
+                data,
+                x=x_metric,
+                y=y_metric,
+                trendline="ols",
+                title=f"Correlation between {x_metric} and {y_metric}"
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Calculate correlation
+            corr = data[x_metric].corr(data[y_metric])
+            
+            st.info(f"Correlation coefficient: {corr:.2f}")
+            
+            # Interpretation
+            if abs(corr) > 0.7:
+                st.success(f"Strong {'positive' if corr > 0 else 'negative'} correlation")
+            elif abs(corr) > 0.3:
+                st.info(f"Moderate {'positive' if corr > 0 else 'negative'} correlation")
+            else:
+                st.warning("Weak correlation")
+        
+        # Show full correlation matrix
+        if len(numeric_cols) > 2:
+            with st.expander("View full correlation matrix"):
+                corr_matrix = data[numeric_cols].corr()
+                
+                # Create heatmap
+                fig, ax = plt.subplots(figsize=(10, 8))
+                sns.heatmap(corr_matrix, annot=True, cmap="coolwarm", fmt=".2f", ax=ax)
+                plt.tight_layout()
+                
+                st.pyplot(fig)
+    
+    with tab3:
+        st.subheader("Summary Statistics")
+        
+        # Get numeric columns for summary
+        numeric_cols = data.select_dtypes(include=[np.number]).columns.tolist()
+        
+        if numeric_cols:
+            summary_df = data[numeric_cols].describe().T
+            
+            # Round to 2 decimal places
+            summary_df = summary_df.round(2)
+            
+            st.dataframe(summary_df)
+            
+            # Show weekly averages if date column exists
+            if date_col:
+                with st.expander("View weekly averages"):
+                    # Convert date to week start
+                    data['Week'] = pd.to_datetime(data[date_col]).dt.to_period('W').dt.start_time
+                    
+                    # Group by week and calculate mean
+                    weekly_avg = data.groupby('Week')[numeric_cols].mean().reset_index()
+                    
+                    # Round to 2 decimal places
+                    weekly_avg[numeric_cols] = weekly_avg[numeric_cols].round(2)
+                    
+                    st.dataframe(weekly_avg)
+
+def display_analysis_results(profile: Dict[str, Any], analysis: Dict[str, Any]):
+    """Display the fitness analysis results"""
+    if not analysis:
+        return
+    
+    st.header("🔍 Your Fitness Analysis")
+    
+    # Display BMI and category
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("BMI", f"{analysis.get('bmi', 0):.1f}")
+    
+    with col2:
+        st.metric("BMI Category", analysis.get("bmi_category", "Unknown"))
+    
+    with col3:
+        # Determine which calorie number to show based on goals
+        goals = profile.get("fitness_goals", "").lower()
+        
+        if "lose" in goals or "weight loss" in goals:
+            calorie_key = "weight_loss"
+            calorie_label = "Weight Loss Target"
+        elif "gain" in goals or "muscle" in goals:
+            calorie_key = "weight_gain"
+            calorie_label = "Weight Gain Target"
+        else:
+            calorie_key = "maintenance"
+            calorie_label = "Maintenance Calories"
+        
+        daily_calories = analysis.get("calorie_needs", {}).get(calorie_key, 2000)
+        st.metric(calorie_label, f"{daily_calories} kcal/day")
+    
+    # Display key insights
+    st.subheader("Key Insights")
+    
+    for i, insight in enumerate(analysis.get("key_insights", [])):
+        st.info(insight)
+    
+    # Areas of improvement and strengths
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("Areas to Improve")
+        for i, area in enumerate(analysis.get("areas_of_improvement", [])):
+            st.warning(area)
+    
+    with col2:
+        st.subheader("Your Strengths")
+        for i, strength in enumerate(analysis.get("strengths", [])):
+            st.success(strength)
+
+def display_recommendations(recommendation: Dict[str, Any]):
+    """Display fitness recommendations"""
+    if not recommendation:
+        return
+    
+    st.header("💪 Your Personalized Fitness Plan")
+    
+    # Display summary
+    st.info(recommendation.get("summary", ""))
+    
+    # Display workout plan
+    with st.expander("🏋️‍♂️ Workout Plan", expanded=True):
+        workout_plan = recommendation.get("workout_plan", {})
+        
+        if workout_plan:
+            # Check if workout plan has a day-by-day structure
+            if any(key.lower().startswith(("day", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")) for key in workout_plan.keys()):
+                # Display as a weekly plan
+                for day, exercises in workout_plan.items():
+                    st.subheader(day)
+                    
+                    if isinstance(exercises, str):
+                        st.write(exercises)
+                    elif isinstance(exercises, list):
+                        for exercise in exercises:
+                            st.write(f"- {exercise}")
+                    elif isinstance(exercises, dict):
+                        for exercise, details in exercises.items():
+                            st.write(f"**{exercise}:** {details}")
+            else:
+                # Display as a general plan
+                for section, content in workout_plan.items():
+                    st.subheader(section)
+                    
+                    if isinstance(content, str):
+                        st.write(content)
+                    elif isinstance(content, list):
+                        for item in content:
+                            st.write(f"- {item}")
+                    elif isinstance(content, dict):
+                        for key, value in content.items():
+                            st.write(f"**{key}:** {value}")
+    
+    # Display dietary advice
+    with st.expander("🍽️ Dietary Recommendations", expanded=True):
+        dietary_advice = recommendation.get("dietary_advice", {})
+        
+        if dietary_advice:
+            for section, content in dietary_advice.items():
+                st.subheader(section)
+                
+                if isinstance(content, str):
+                    st.write(content)
+                elif isinstance(content, list):
+                    for item in content:
+                        st.write(f"- {item}")
+                elif isinstance(content, dict):
+                    for key, value in content.items():
+                        st.write(f"**{key}:** {value}")
+    
+    # Display habit changes
+    with st.expander("🔄 Recommended Habit Changes"):
+        habit_changes = recommendation.get("habit_changes", [])
+        
+        if habit_changes:
+            for habit in habit_changes:
+                st.success(habit)
+    
+    # Display progress metrics to track
+    with st.expander("📊 Progress Metrics to Track"):
+        metrics = recommendation.get("progress_metrics", [])
+        
+        if metrics:
+            for metric in metrics:
+                st.info(metric)
+
+def display_qa_section(profile: Dict[str, Any], analysis: Dict[str, Any], recommendation: Dict[str, Any]):
+    """Display Q&A section for user questions"""
+    st.header("❓ Ask Your Fitness Coach")
+    
+    # Initialize conversation history if not exists
+    if "qa_history" not in st.session_state:
+        st.session_state.qa_history = []
+    
+    # Display conversation history
+    for q, a in st.session_state.qa_history:
+        st.markdown(f"**You:** {q}")
+        st.markdown(f"**Coach:** {a}")
+    
+    # Input for new questions
+    question = st.text_input("What would you like to know about your fitness plan?")
+    
+    if st.button("Ask", use_container_width=True) and question:
+        # Check if we have analysis and recommendations
+        if not analysis or not recommendation:
+            st.warning("⚠️ Please generate your fitness analysis and recommendations first.")
+            return
+        
+        with st.spinner("Thinking..."):
+            # Run QA node through agent
+            agent_executor = get_agent_executor()
+            state = FitnessAgentState(
+                user_profile=profile,
+                fitness_data=pd.DataFrame(),  # Not used in QA
+                analysis=analysis,
+                recommendation=recommendation,
+                question=question
+            )
+            result = agent_executor.invoke(state)
+            
+            # Get the answer
+            answer = result["answer"]
+            
+            # Add to history
+            st.session_state.qa_history.append((question, answer))
+            
+            # Display the answer
+            st.markdown(f"**You:** {question}")
+            st.markdown(f"**Coach:** {answer}")
+
+def export_data(profile: Dict[str, Any], analysis: Dict[str, Any], recommendation: Dict[str, Any]):
+    """Export fitness plan to a file"""
+    if not analysis or not recommendation:
+        return
+    
+    st.header("📋 Export Your Fitness Plan")
+    
+    export_format = st.selectbox("Export Format", ["PDF", "JSON", "Markdown"])
+    
+    if st.button("Generate Export", use_container_width=True):
+        # Create export folder if not exists
+        export_folder = os.path.join(DATA_FOLDER, "exports")
+        os.makedirs(export_folder, exist_ok=True)
+        
+        # Generate timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        if export_format == "JSON":
+            # Combine all data
+            export_data = {
+                "user_profile": profile,
+                "fitness_analysis": analysis,
+                "fitness_recommendation": recommendation,
+                "generated_at": timestamp
+            }
+            
+            # Save to file
+            file_path = os.path.join(export_folder, f"fitness_plan_{timestamp}.json")
+            
+            with open(file_path, "w") as f:
+                json.dump(export_data, f, indent=4)
+            
+            st.success(f"✅ Fitness plan exported to {file_path}")
+        
+        elif export_format == "Markdown":
+            # Create markdown content
+            md_content = f"""# Your Personal Fitness Plan
+Generated on {datetime.now().strftime("%Y-%m-%d %H:%M")}
+
+## User Profile
+- Age: {profile.get('age')}
+- Weight: {profile.get('weight')} kg
+- Height: {profile.get('height')} cm
+- Sex: {profile.get('sex')}
+- Activity Level: {profile.get('activity_level')}
+- Dietary Preferences: {profile.get('dietary_preferences')}
+- Fitness Goals: {profile.get('fitness_goals')}
+
+## Fitness Analysis
+- BMI: {analysis.get('bmi'):.1f}
+- BMI Category: {analysis.get('bmi_category')}
+
+### Key Insights
+{chr(10).join(f"- {insight}" for insight in analysis.get('key_insights', []))}
+
+### Areas to Improve
+{chr(10).join(f"- {area}" for area in analysis.get('areas_of_improvement', []))}
+
+### Strengths
+{chr(10).join(f"- {strength}" for strength in analysis.get('strengths', []))}
+
+## Workout Plan
+{recommendation.get('summary')}
+
+"""
+            # Add workout plan details
+            workout_plan = recommendation.get('workout_plan', {})
+            if workout_plan:
+                md_content += "\n### Workout Details\n"
+                for key, value in workout_plan.items():
+                    md_content += f"\n#### {key}\n"
+                    if isinstance(value, str):
+                        md_content += f"{value}\n"
+                    elif isinstance(value, list):
+                        md_content += "\n".join(f"- {item}" for item in value) + "\n"
+                    elif isinstance(value, dict):
+                        md_content += "\n".join(f"- **{k}**: {v}" for k, v in value.items()) + "\n"
+            
+            # Add dietary advice
+            dietary_advice = recommendation.get('dietary_advice', {})
+            if dietary_advice:
+                md_content += "\n## Dietary Recommendations\n"
+                for key, value in dietary_advice.items():
+                    md_content += f"\n### {key}\n"
+                    if isinstance(value, str):
+                        md_content += f"{value}\n"
+                    elif isinstance(value, list):
+                        md_content += "\n".join(f"- {item}" for item in value) + "\n"
+                    elif isinstance(value, dict):
+                        md_content += "\n".join(f"- **{k}**: {v}" for k, v in value.items()) + "\n"
+            
+            # Add habit changes
+            habit_changes = recommendation.get('habit_changes', [])
+            if habit_changes:
+                md_content += "\n## Recommended Habit Changes\n"
+                md_content += "\n".join(f"- {habit}" for habit in habit_changes) + "\n"
+            
+            # Add progress metrics
+            metrics = recommendation.get('progress_metrics', [])
+            if metrics:
+                md_content += "\n## Progress Metrics to Track\n"
+                md_content += "\n".join(f"- {metric}" for metric in metrics) + "\n"
+            
+            # Save to file
+            file_path = os.path.join(export_folder, f"fitness_plan_{timestamp}.md")
+            
+            with open(file_path, "w") as f:
+                f.write(md_content)
+            
+            st.success(f"✅ Fitness plan exported to {file_path}")
+        
+        elif export_format == "PDF":
+            # For PDF, we'll use a simple approach with markdown-to-pdf
+            # In a production app, you'd use a more robust PDF generation library
+            st.warning("PDF export would require additional libraries. For now, please use Markdown export.")
+
