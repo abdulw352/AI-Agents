@@ -938,3 +938,104 @@ Generated on {datetime.now().strftime("%Y-%m-%d %H:%M")}
             # In a production app, you'd use a more robust PDF generation library
             st.warning("PDF export would require additional libraries. For now, please use Markdown export.")
 
+def main():
+    """Main function for the Streamlit app"""
+    # Initialize session state
+    if "analysis_results" not in st.session_state:
+        st.session_state.analysis_results = None
+    
+    if "recommendations" not in st.session_state:
+        st.session_state.recommendations = None
+    
+    st.title("💪 AI Fitness Trainer")
+    st.markdown("""
+        <div style='background-color: #1E88E5; padding: 1rem; border-radius: 0.5rem; margin-bottom: 2rem; color: white;'>
+        Get personalized fitness analysis and recommendations tailored to your goals and unique profile.
+        Our AI-powered system analyzes your data to create the perfect fitness plan just for you.
+        </div>
+    """, unsafe_allow_html=True)
+    
+    # Sidebar for LLM configuration
+    with st.sidebar:
+        st.header("⚙️ Configuration")
+        
+        # Check if Ollama is installed and running
+        try:
+            llm = get_llm()
+            st.success("✅ Connected to Ollama with Llama3.1")
+        except Exception as e:
+            st.error(f"❌ Error connecting to Ollama: {str(e)}")
+            st.info("""
+                Please make sure Ollama is installed and running with Llama3.1 model.
+                
+                Installation instructions:
+                1. Download Ollama from https://ollama.ai/
+                2. Run `ollama pull llama3.1` to download the model
+            """)
+            return
+        
+        # Display app sections
+        st.header("📑 Sections")
+        st.markdown("""
+            - User Profile
+            - Data Upload
+            - Data Visualization
+            - Fitness Analysis
+            - Recommendations
+            - Ask Your Coach
+            - Export Plan
+        """)
+        
+        # Add reset button
+        if st.button("Reset All Data", use_container_width=True):
+            # Clear session state
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            
+            st.success("✅ All data reset!")
+            st.rerun()
+    
+    # User profile section
+    profile = render_profile_form()
+    
+    # Data upload section
+    fitness_data = render_data_upload()
+    
+    # Data visualization if data is available
+    if not fitness_data.empty:
+        visualize_data(fitness_data)
+    
+    # Generate analysis button
+    if profile and st.button("🔍 Generate Analysis & Recommendations", use_container_width=True):
+        with st.spinner("Analyzing your fitness data and creating personalized recommendations..."):
+            # Create initial state
+            initial_state = FitnessAgentState(
+                user_profile=profile,
+                fitness_data=fitness_data,
+                analysis=None,
+                recommendation=None
+            )
+            
+            # Run agent
+            agent_executor = get_agent_executor()
+            result = agent_executor.invoke(initial_state)
+            
+            # Store results in session state
+            st.session_state.analysis_results = result["analysis"]
+            st.session_state.recommendations = result["recommendation"]
+            
+            st.success("✅ Analysis and recommendations generated!")
+    
+    # Display analysis and recommendations if available
+    if st.session_state.analysis_results and st.session_state.recommendations:
+        display_analysis_results(profile, st.session_state.analysis_results)
+        display_recommendations(st.session_state.recommendations)
+        
+        # Display QA section
+        display_qa_section(profile, st.session_state.analysis_results, st.session_state.recommendations)
+        
+        # Export section
+        export_data(profile, st.session_state.analysis_results, st.session_state.recommendations)
+
+if __name__ == "__main__":
+    main()
